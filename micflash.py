@@ -162,15 +162,19 @@ class pm3dgrid(object):
         self._domain_blocks = (self._domain_size/self._bbox_minsize +.5).astype(np.int32)
         self._domain_cells = self._domain_blocks * self._nb
         # Precalculate (reciprocal) values to aleviate findblock/findblockcell
-        self.__xmin = self._domain_min[0]
-        self.__ymin = self._domain_min[1]
-        self.__zmin = self._domain_min[2]
         self.__cell_xsize_recp = self.__nxb * 1./self._bbox_size[:,0]
         self.__cell_ysize_recp = self.__nyb * 1./self._bbox_size[:,1]
         self.__cell_zsize_recp = self.__nzb * 1./self._bbox_size[:,2]
-        self.__block_xminsize_recp = 1./self._bbox_minsize[0]
-        self.__block_yminsize_recp = 1./self._bbox_minsize[1]
-        self.__block_zminsize_recp = 1./self._bbox_minsize[2]
+        # Store information about periodicity
+        self.__xl_periodic = str(flashfile['string runtime parameters/xl_boundary_type']).lower() == 'periodic'
+        self.__yl_periodic = str(flashfile['string runtime parameters/yl_boundary_type']).lower() == 'periodic'
+        self.__zl_periodic = str(flashfile['string runtime parameters/zl_boundary_type']).lower() == 'periodic'
+        self.__xr_periodic = str(flashfile['string runtime parameters/xr_boundary_type']).lower() == 'periodic'
+        self.__yr_periodic = str(flashfile['string runtime parameters/yr_boundary_type']).lower() == 'periodic'
+        self.__zr_periodic = str(flashfile['string runtime parameters/zr_boundary_type']).lower() == 'periodic'
+        self.__x_periodic = self.__xl_periodic and self.__xr_periodic
+        self.__y_periodic = self.__yl_periodic and self.__yr_periodic
+        self.__z_periodic = self.__zl_periodic and self.__zr_periodic
         # Store information about dimensionality
         self.__trivial_dim = (self._nb == 1)
         self.__uniform_dim = (self._bbox_minsize / self._bbox_maxsize) > (1.-1e-4)
@@ -233,7 +237,7 @@ class pm3dgrid(object):
         return (len(self.__rlevel), self.__nzb, self.__nyb, self.__nxb)
         
     def cell_rlevel(self):
-        shape_ones = np.ones(self.blk_shape(), dtype=np.int)
+        shape_ones = np.ones(self.blk_shape(), dtype=int)
         return self.__rlevel[:,None,None,None] *shape_ones
     
         
@@ -267,12 +271,15 @@ class pm3dgrid(object):
         return hash(hashable_repr)
         
 # --- FIND BLOCK ID BY COORDINATE -------------------------------------------------
-    def findblock(self, x, y, z):
+    def findblock(self, x, y, z, lmax=None):
         """
         Return the index of the block containing the coordinates x, y, z.
         Capable of processing multiple data on receiving vectorized input.
         """
-        return self._blocktree.Findblock(x, y, z).astype(np.int64)
+        if lmax is None:
+            return self._blocktree.Findblock(x, y, z).astype(np.int64)
+        else:
+            return self._blocktree.Findblock_lmax(x, y, z, int(lmax)).astype(np.int64)
     
 # --- FIND BLOCK AND CELL ID BY COORDINATE -------------------------------------
     def findblockcell(self, block, x, y, z):
@@ -290,16 +297,33 @@ class pm3dgrid(object):
         k = np.clip(iz, 0, self.__nzb-1)
         return (k, j, i)
         
-    def findcell(self, x, y, z):
+    def findcell(self, x, y, z, lmax=None):
         """
         Return the index of the block and the flat index of the blockcell
         containing the coordinates x, y, z.
         Capable of processing multiple data on receiving vectorized input.
         """
-        block = self.findblock(x, y, z)
+        block = self.findblock(x, y, z, lmax)
         kji = self.findblockcell(block, x, y, z)
         return block, kji
-
+    
+    def find(self, x, y, z, lmax=None, wrap=True):
+        """
+        Return the index of the block and the flat index of the blockcell
+        containing the coordinates x, y, z.
+        Capable of processing multiple data on receiving vectorized input.
+        """
+        xw, yw, zw = x, y, z
+        if wrap:
+            xmin, ymin, zmin = self._domain_min
+            xmax, ymax, zmax = self._domain_max
+            if self.__x_periodic: xw = modclip(x, xmin, xmax)
+            if self.__y_periodic: yw = modclip(y, ymin, ymax)
+            if self.__z_periodic: zw = modclip(z, zmin, zmax)
+        block = self.findblock(xw, yw, zw, lmax)
+        k,j,i = self.findblockcell(block, xw, yw, zw)
+        return (block,k,j,i)
+    
 # --- FIND BLOCK AND FRACTIONAL CELL ID BY COORDINATE --------------------------
     def findblockfc(self, block, x, y, z):
         """
