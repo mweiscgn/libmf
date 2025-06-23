@@ -445,8 +445,14 @@ class pm3dgrid(object):
         else:
             extent_min, extent_max = extent
             
-        if res is None:
+        if res is None or res=='full':
             provisional_step = self.spacing(axis)
+        elif res=='half':
+            provisional_step = self.spacing(axis) * 2.
+        elif res=='quarter':
+            provisional_step = self.spacing(axis) * 4.
+        elif (0.<res) and (res<=1.):
+            provisional_step = self.spacing(axis) * (1./res)
         else:
             provisional_step = (extent_max-extent_min) / res
             

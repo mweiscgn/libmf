@@ -501,7 +501,7 @@ class datagrid(object):
             answer += ('*'+str(self.fgrid._nb[axis]))
             answer += ' / ' +str(self.fgrid._domain_blocks[axis]*nax) +' (var)'
             print(f'Depth resolution: {answer}')
-            mapres = len((X,Y,Z)[axis-1])
+            mapres = (X,Y,Z)[axis-1].shape
             print(f'Map resolution: {mapres}')
             sys.stdout.flush()
             
