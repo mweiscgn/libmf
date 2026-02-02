@@ -23,6 +23,8 @@ __version__ = '1.0.0.0'
 homepath = os.path.expanduser("~")
 wall = str(int(time.time()))
 
+ax_xy_order = {0:[1,2], 1:[0,2], 2:[0,1]}
+
 
 #===============================================================================
 # ==== GENERAL FIGURE TOOLS ====================================================
@@ -81,6 +83,19 @@ fig_presets = {
         'figdpi': 150,
         'fontsize': 12,
         'legend_fontsize': 12,
+        'legend_enable': True,
+        'figtitle_enable': True,
+        'subpath_enable': True,
+        'counter_enable': False,
+        'extension': '.png',
+        'bbox_inches': None,
+        'enum_marker': False,
+        }, 
+    'highres': {
+        'figsize': (51.20, 28.80),
+        'figdpi': 200,
+        'fontsize': 10,
+        'legend_fontsize': 10,
         'legend_enable': True,
         'figtitle_enable': True,
         'subpath_enable': True,
@@ -638,15 +653,16 @@ def get_savefig_filepath(name, subpath=''):
     filepath = os.path.join(filedir, filename+fileext)
     return filepath
 
-def sanitize_save_target(filedir, filename, fileext):
+def sanitize_save_target(filedir, filename, fileext, autorename=True):
     # Assemble path to file
     filepath = os.path.join(filedir, filename+fileext)
-    # Rename if a file with the same name already exists:
-    i = 1
-    while os.path.exists(filepath):
-        i += 1
-        filename_new = filename +'_V%i'%i
-        filepath = os.path.join(filedir, filename_new+fileext)
+    if autorename:
+        # Rename if a file with the same name already exists:
+        i = 1
+        while os.path.exists(filepath):
+            i += 1
+            filename_new = filename +'_V%i'%i
+            filepath = os.path.join(filedir, filename_new+fileext)
     # Make target directory if non-existent
     makedir(os.path.dirname(filepath))
     return filepath
@@ -685,12 +701,12 @@ def saveimg(img, name, subpath='', raw_gamma=2.2, **overrides):
     return filepath
     
 
-def savefig(fig, name, subpath='', autoclose=True, autopickle=False, **overrides):
+def savefig(fig, name, subpath='', autoclose=True, autopickle=False, autorename=True, **overrides):
     # Load figure settings
     fs = fig_presets[fig_target]
     # Get unused filepath in guaranteed directory
     filedir, filename, fileext = get_savefig_target(name, subpath=subpath)
-    filepath = sanitize_save_target(filedir, filename, fileext)
+    filepath = sanitize_save_target(filedir, filename, fileext, autorename=autorename)
     # Set figure parameters
     # figsize is ignored by savefig, but set as a parameter anyways,
     # because the user can then use the override to control the figure size.
@@ -794,7 +810,7 @@ def get_iregular_ticks(norm, nmin=4):
         tryticks += list(5.*orderticks)
         ticks = filter_ticks(tryticks, norm, nmin)
     if len(ticks)<nmin: # stage 3: Add 2nd digit ticks
-        order = np.int(np.rint(np.log10(vmax-vmin)))
+        order = np.int64(np.rint(np.log10(vmax-vmin)))
         tryticks += list(np.round(norm.inverse(np.linspace(0, 1, nmin+1)), -order+3))
         ticks = filter_ticks(tryticks, norm, nmin)
     tickpos = cl.Normalize(vmin, vmax).inverse(norm(ticks))
@@ -1057,6 +1073,40 @@ def WeightedAvg(values, errors):
 
 
 #===============================================================================
+# ==== temperature color calculator ============================================
+#===============================================================================
+
+def _PlanckE(wl, temp):
+    # Spectral energy density in terms of wavelength
+    h = 6.626070e-34
+    c = 3e+8
+    kb = 1.380649e-23
+    u_wl = 8.*np.pi*h*c/wl**5 / (np.exp(h*c/(wl*kb*temp))-1.)
+    return np.log10(u_wl)
+
+def _ConeFundamentals():
+    # For tables see http://cvrl.ucl.ac.uk/cones.htm
+    # We use the 2-deg fundamentals based on the Stiles & Burch 10-deg CMFs
+    conefile = './libmf/ss2_10e_1.csv'
+    fields = ['wavelength', 'logL', 'logM', 'logS']
+    data = np.genfromtxt(conefile, names=fields, delimiter=',')
+    return data
+
+cfd = _ConeFundamentals()
+def TempColor(temp, gamma=1.0):
+    ta = np.array(temp)[...,None]
+    wl = cfd['wavelength'] * 1e-9
+    lL, lM, lS = cfd['logL'], cfd['logM'], cfd['logS']
+    lPl = _PlanckE(wl, ta)
+    L_response = np.sum(10**(lL+lPl), axis=-1)
+    M_response = np.sum(10**(lM+lPl), axis=-1)
+    S_response = np.sum(10**(lS+lPl), axis=-1)
+    RGB = (np.array([L_response, M_response, S_response])**gamma).T
+    RGB /= np.maximum(1e-10,np.nanmax(RGB, axis=-1))[...,None]
+    return RGB
+    
+
+#===============================================================================
 # ==== color value manipulation helper =========================================
 #===============================================================================
 def rescale(X, Ymin=0.05, Ymax=0.95, Xmin=0., Xmax=1.):
@@ -1154,7 +1204,7 @@ def register_cmap(**kwargs):
     segmentdata = kwargs.pop('data')
     lsc = cl.LinearSegmentedColormap(name, segmentdata)
     #plt.register_cmap(cmap=lsc, **kwargs)
-    #mpl.colormaps.register(cmap=lsc, **kwargs)
+    mpl.colormaps.register(cmap=lsc, **kwargs)
     # TODO: WHAT NOW?
 
 # ==== COLORMAP FADER ==========================================================

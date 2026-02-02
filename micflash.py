@@ -226,6 +226,10 @@ class pm3dgrid(object):
         answer += 'Cell layout:   ' + str(self._domain_cells) + ' '
         answer += '(' + str(len(self._bbox_center)*self._blockcells) + ')' + '\n'
         return answer
+    
+    def periodic(self):
+        prdc = self.__x_periodic, self.__y_periodic, self.__z_periodic
+        return prdc
         
     def blk_rlevel(self):
         return self.__rlevel

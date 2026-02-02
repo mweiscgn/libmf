@@ -88,10 +88,10 @@ class flashfile(object):
                         val = value.rstrip() if isinstance(value, str) else value
                         dsdict[subkey] = val
                 return dsdict
-            elif np.issubdtype(dtype_in, np.string_):
-                strarr_raw = np.array(data, dtype=np.string_)
+            elif np.issubdtype(dtype_in, np.bytes_):
+                strarr_raw = np.array(data, dtype=np.bytes_)
                 stripfunc = lambda s: s.strip()
-                arrstrip = np.vectorize(stripfunc, [np.unicode_])
+                arrstrip = np.vectorize(stripfunc, [np.str_])
                 strarr = arrstrip(np.squeeze(strarr_raw))
                 return strarr
             else:
@@ -111,13 +111,16 @@ class flashfile(object):
         dn = os.path.dirname(os.path.abspath(self.__filename))
         return dn
     def close(self):
-        if not self.__closed:
-            try:
-                self.__plotfile.close()
-            except IOError:
-                pass
-            finally:
-                self.__closed = True
+        try:
+            if not self.__closed:
+                try:
+                    self.__plotfile.close()
+                except IOError:
+                    pass
+                finally:
+                    self.__closed = True
+        except AttributeError:
+            pass
 
 
 # ==============================================================================
@@ -155,6 +158,12 @@ class plotfile(flashfile):
                 if data.shape[0] == self.__nodecount:
                     return data[self.__nodeselect]
         return data
+    def flush(self, key=None):
+        if key is None:
+            self.__memodict.clear()
+            return None
+        else:
+            return self.__memodict.pop(key, None)
     def cache(self, key, dataset, force=True):
         if self.__memorize or force:
             self.__memodict[key] = dataset
@@ -196,6 +205,8 @@ class plotfile(flashfile):
         nxb = (self.__getitem__('integer scalars/nxb')).item()
         blshape = (nblocks, nzb, nyb, nxb)
         return blshape
+    def dshape(self):
+        return self.blockshape()
     def blockid(self):
         return np.arange(self.__blockcount)
     def nodeid(self):
@@ -240,16 +251,25 @@ class plotfile(flashfile):
 # ==== RPN Formulae for some ubiquitous mhd./chem. vars. =======================
 # ==============================================================================
 
+def enum(a):
+    dshape = a.shape
+    ones = np.ones(dshape, dtype=int)
+    idx = np.cumsum(ones).reshape(dshape)
+    return idx
+
+
 k_b = 1.38064852e-16    # Boltzmann constant (erg/K)
 st_b = 5.670374419e-5   # Stefan-Boltzmann constant (erg/K)
 m_a = 1.660539040e-24     # atomic mass unit (g)/(Da)
 G_g = 6.67408e-8    # Gravitational constant (cgs)
 sq = np.square
 lg = np.log10
+
 #sclip = lambda x: np.clip(x, -1, 1)
 var_grid = {
     'zeros': ('dens', np.zeros_like, ),
     'ones': ('dens', np.ones_like, ),
+    'cellID': ('dens', enum),
     'intones': ('dens', lambda a: np.ones_like(a, dtype=int), ),
     'nxb': ('integer scalars/nxb', ),
     'nyb': ('integer scalars/nyb', ),
@@ -259,6 +279,7 @@ var_grid = {
     'lenx': ('block size', lambda a: np.reshape(a[...,0], (-1,1,1,1)), 'ones', '*', 'nxb', '/'),
     'leny': ('block size', lambda a: np.reshape(a[...,1], (-1,1,1,1)), 'ones', '*', 'nyb', '/'),
     'lenz': ('block size', lambda a: np.reshape(a[...,2], (-1,1,1,1)), 'ones', '*', 'nzb', '/'),
+    'dl': ('lenx','leny','lenz',6.,'*','*','/'),
     'areax': ('vol', 'lenx', '/'),
     'areay': ('vol', 'leny', '/'),
     'areaz': ('vol', 'lenz', '/'),
@@ -274,6 +295,7 @@ var_grid = {
     'blockindex': ('blid', lambda x: np.reshape(x, (-1,1,1,1)), 'intones', '*'),
     'jl_ref':   ('integer runtime parameters/ncell_ref_jeans', ),
     'jl_deref': ('integer runtime parameters/ncell_deref_jeans', ),
+    'hsml': ('length', 2., '*'), # Assumed smoothing length for converting to sph
 }
 
 var_2d = {
@@ -340,6 +362,14 @@ var_mhd = {
     'l_jH_ratio': ('c_a','c_s','/', sq, 1., '+', np.sqrt),
     'l_jH': ('l_jH_ratio', 'l_jeans', '*'),
 
+    't_ff_sphere': (3.*np.pi/32., G_g, 'dens', '*', '/', np.sqrt), # Kippenhahn, Weigert & Weiss, 1990
+    
+    'dens_jet': ('ofmi', 'dens', '*'),
+    'dens_wind': ('ofwi', 'dens', '*'),
+
+    'mass_jet': ('dens_jet', 'vol', '*'),
+    'mass_wind': ('dens_wind', 'vol', '*'),
+
     # The factors (1./8.) come from the jeans length relating to the diameter
     # of the collapsing sphere (as opposed to the radius)
     'm_j': ('l_jeans', 3, '**', 4./(3.*8.)*np.pi, '*', 'dens', '*'), # Local jeans mass
@@ -361,6 +391,22 @@ var_mhd = {
     'rpa': ('rpax', sq, 'rpay', sq, 'rpaz', sq, '+', '+', np.sqrt),
     
     'rpg_ratio': ('rpa', 'gpa', '/'),
+    'tdiff': ('temp', 'tdus', '-'),
+    
+    'sndspd': ('c_s',np.sqrt(5./3.), '*'),
+    'dt_ltempx': ('sndspd', 'velx', np.fabs, '+', 'lenx', '/'),
+    'dt_ltempy': ('sndspd', 'vely', np.fabs, '+', 'leny', '/'),
+    'dt_ltempz': ('sndspd', 'velz', np.fabs, '+', 'lenz', '/'),
+    'dt_ltemp': ('dt_ltempx', 'dt_ltempy', np.maximum, 'dt_ltempz', np.maximum),
+    'dthydro': (.5, 'dt_ltemp', '/'),
+
+    'mhdspd': ('sndspd', 'c_a', np.maximum),
+    'dt_ltmhdx': ('mhdspd', 'velx', np.fabs, '+', 'lenx', '/'),
+    'dt_ltmhdy': ('mhdspd', 'vely', np.fabs, '+', 'leny', '/'),
+    'dt_ltmhdz': ('mhdspd', 'velz', np.fabs, '+', 'lenz', '/'),
+    'dt_ltmhd': ('dt_ltmhdx', 'dt_ltmhdy', np.maximum, 'dt_ltmhdz', np.maximum),
+    'dtmhd': (.5, 'dt_ltmhd', '/'),
+    
 }
 
 ch_mu5 = {
@@ -408,6 +454,7 @@ var_ch5 = {
     'nhtot': ('cdto', 1.8e+21, '*'), # Effective column density
     'ch_ihx': ('ch_ihp', 'ch_iha', 'ch_ih2', '+', '+'),
     'hstate': ('ch_ihp', 'ch_ih2', '-', 'ch_ihx', '/'),
+    'cnt_hx': ('n_hx', 'vol', '*'),
 }
 
 ch_mu15 = {

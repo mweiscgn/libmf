@@ -3,7 +3,7 @@ import sys
 from .tricubic_direct import tricubic
 
 __author__ = "Michael Weis"
-__version__ = "1.0.0.0"
+__version__ = "1.0.1.0"
 
 ################################################################################
 # ==== HELPER ==================================================================
@@ -15,7 +15,7 @@ def modclip(a, a_min, a_max):
 def ResampleNearest(a_in, targetres):
     # Calculate normalized (i.e.]0..1[) midpoint positions of the target resolution field
     targetidx = np.meshgrid(*targetres, indexing='ij')
-    npos = [(0.5+idx)/np.max(idx+1.0) for idx in baseidx]
+    npos = [(0.5+idx)/np.max(idx+1.0) for idx in targetidx]
     # Convert normalized indicies to input resolution indicies
     inputres = a_in.shape
     sourceidx = [np.int_(nidx*res) for nidx,res in zip(npos,inputres)]
@@ -382,7 +382,7 @@ class datagrid(object):
         # The integration axis [x,y,z][axis] is removed from the order [z,y,x],
         # the other axes stay in place
 
-        ax_coverage = [extent_coverage(axis, x_extent, y_extent, z_extent) for axis in [0,1,2]]
+        ax_coverage = [self.extent_coverage(axis, x_extent, y_extent, z_extent) for axis in [0,1,2]]
         ax_cellsize = [self.fgrid.cellsize()[axis][:,None,None,None] for axis in [0,1,2]]
         cell_coverage = ax_coverage[0]*ax_coverage[1]*ax_coverage[2]
         dL = cell_coverage * ax_cellsize[axis]
@@ -473,7 +473,11 @@ class datagrid(object):
 
     def integrate_axis(self, axis, interpolation='linear', verbose=False,
             xres=None, yres=None, zres=None,
-            x_extent=None, y_extent=None, z_extent=None):
+            x_extent=None, y_extent=None, z_extent=None, **fooargs):
+        
+        if fooargs:
+            print('Warning: integrate_axis got unexpected keywords:')
+            print(list(fooargs.keys()))
             
         X, Y, Z = self.fgrid.basegrid_2d(axis, xres=xres, yres=yres, zres=zres,
                 x_extent=x_extent, y_extent=y_extent, z_extent=z_extent)
@@ -508,7 +512,7 @@ class datagrid(object):
         coord_shape = (X,Y,Z)[axis-1].shape
         result_accu = np.zeros(coord_shape)
         
-        for intercept, dL in zip(grating, gratedepth):
+        for i, (intercept, dL) in enumerate(zip(grating, gratedepth)):
             if axis==0:
                 X = np.full(coord_shape, intercept)
             elif axis==1:
@@ -521,6 +525,11 @@ class datagrid(object):
                                      axis=axis, wrap=False)
             blockax_len_slice = dL * blockax_coverage_slice
             result_accu += blockax_avgdata_slice * blockax_len_slice
+            if verbose:
+                print(f'\r{i+1}/{len(grating)}', end='')
+                sys.stdout.flush()
+        if verbose:
+            print()
         return result_accu
         
 
@@ -640,7 +649,7 @@ class datagrid(object):
         result_accu = np.zeros_like((X,Y,Z)[axis-1])   
         weight_accu = np.zeros_like((X,Y,Z)[axis-1])
         
-        for intercept, iweight in zip(grating, gratingweights):
+        for i, (intercept, iweight) in enumerate(zip(grating, gratingweights)):
             if axis==0:
                 X = np.full_like(Z, intercept)
             elif axis==1:
@@ -653,6 +662,11 @@ class datagrid(object):
                                      axis=axis, wrap=False)
             result_accu += dataslice*weightslice*iweight
             weight_accu += weightslice*iweight
+            if verbose:
+                print(f'\r{i+1}/{len(grating)}', end='')
+                sys.stdout.flush()
+        if verbose:
+            print()
         return result_accu/weight_accu
     
             

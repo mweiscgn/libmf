@@ -72,6 +72,12 @@ def timestr():
     tstr += "%02d%02d%02d"%(t.tm_hour,t.tm_min,t.tm_sec)+'-'
     tstr += 'R'+str(np.random.randint(100))
     return tstr
+    
+def datestr():
+    from datetime import date
+    today = date.today()
+    dstr = today.strftime("%Y-%m-%d")
+    return dstr
 
 
 #===============================================================================
@@ -131,9 +137,15 @@ def sim_scalars(hdfdata):
 # ==== FINGERPRINTING ==========================================================
 #===============================================================================
 
-def get_array_fingerprint(a):
-    hashable_repr = a.tostring()
-    fingerprint = format(hash27(hashable_repr), 'x')
+def get_array_fingerprint(a, fast=False):
+    if fast:
+        # Idea: It is very unprobable for two different fields/masks
+        # to have exactly the same sum in each block, respectively
+        arr = np.sum(a, axis=(1,2,3))
+        fingerprint = get_array_fingerprint(arr, fast=False)
+    else:
+        hashable_repr = a.tostring()
+        fingerprint = format(hash27(hashable_repr), 'x')
     return fingerprint
 
 def get_grid_fingerprint(hdfdata):
@@ -250,15 +262,15 @@ def load_data(infile):
             data = pickle.load(f)
     return data
 
-def get_datafile_path(hdfdata, prefix, suffix='', extension='.pkl', dirname=None):
+def get_datafile_path(hdfdata, prefix, suffix='', extension='.pkl', outdir=None):
     # Build path to data file from plotfile path
     plotfile = hdfdata.filename()
     basename = os.path.basename(plotfile).replace('_hdf5', '')
     filename = prefix +basename +suffix +extension
-    if dirname is None:
-        basedir = os.path.dirname(plotfile)
-        dirname = os.path.join(basedir, datadir)
-    filepath = os.path.join(dirname, filename)
+    if outdir is None: outdir = datadir
+    basedir = os.path.dirname(plotfile)
+    filedir = os.path.join(basedir, outdir)
+    filepath = os.path.join(filedir, filename)
     return filepath
 
 def CheckFiles(filelist):
